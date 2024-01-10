@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Enter your keystore password here
+keystore_password="your_keystore_password"
+
+# Generate a hashed version of the password
+hashed_password=$(echo -n "$keystore_password" | sha256sum | awk '{print $1}')
+
+# Set an environment variable with the hashed password
+export HASHED_KEYSTORE_PASSWORD="$hashed_password"
