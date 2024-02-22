@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Variables
+serverList="servers.txt" # Path to your list of servers
+emailRecipient="email@example.com"
+warningPeriod=365 # Number of days before expiry to start warning
+currentYear=$(date +"%Y")
+reportFile="/tmp/ssl_report.txt"
+emailSubject="SSL Certificate Renewal Report"
+
+# Function to check SSL certificate information
+function check_ssl_certificate() {
+    local server=$1
+    # Assuming the certificates are stored in /etc/ssl/certs; adjust path as necessary
+    local certsPath="/etc/ssl/certs"
+    
+    # SSH to server and execute commands
+    ssh "$server" bash -c "'
+    if [ -d \"$certsPath\" ]; then
+        echo \"$server - Found SSL Certificates Directory\"
+        lastModTime=\$(stat -c %y \"$certsPath\" | cut -d\".\" -f1)
+        for certFile in \$(ls $certsPath | grep -v \"csr\$\"); do
+            certInfo=\$(openssl x509 -in \"$certsPath/\$certFile\" -noout -subject -dates)
+            echo \"\$(echo \"\$certInfo\" | grep \"subject=CN\" | sed 's/subject=CN = //') (\$lastModTime)\"
+        done
+    else
+        echo \"$server - SSL Certificates Directory Not Found\"
+    fi
+    '"
+}
+
+# Initialize report file
+echo "Server, Certificate CN, Last Modified Date" > "$reportFile"
+
+# Read server list and check each server
+while IFS= read -r server; do
+    check_ssl_certificate "$server" >> "$reportFile"
+done < "$serverList"
+
+# Send email with the report
+mailx -s "$emailSubject" -a "$reportFile" "$emailRecipient" < /dev/null
+
+echo "Report sent to $emailRecipient"
