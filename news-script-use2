@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# Define variables
+outputCsv="/path/to/output.csv" # Adjust the path to where you want to save the CSV file
+serverList="/path/to/servers.txt" # Adjust the path to your list of servers
+emailRecipient="email@example.com" # The email address to send the report to
+emailSubject="SSL Certificate and OS Report"
+
+# Create the CSV header
+echo "Server,OS,IP,Issuer,CN,SAN" > "$outputCsv"
+
+# Function to fetch certificate and OS details
+fetch_details() {
+    local server=$1
+
+    # SSH command to execute on the remote server
+    ssh "$server" bash -c "'
+    # OS and IP details
+    os=\$(grep PRETTY_NAME /etc/os-release | cut -d\"=\" -f2 | tr -d '\"')
+    ip=\$(hostname -I | awk '{print \$1}')
+
+    # Assuming the SSL certificate is in a standard location; adjust as needed
+    certPath=\"/etc/ssl/certs/ssl-cert-snakeoil.pem\"
+
+    if [ -f \"\$certPath\" ]; then
+        # Extract certificate details
+        issuer=\$(openssl x509 -in \"\$certPath\" -noout -issuer | cut -d\"=\" -f3)
+        cn=\$(openssl x509 -in \"\$certPath\" -noout -subject | cut -d\"=\" -f3)
+        san=\$(openssl x509 -in \"\$certPath\" -noout -text | grep \"DNS:\" | sed 's/.*DNS://g' | tr -d ' \n')
+        
+        # Output in CSV format
+        echo \"\$server,\$os,\$ip,\$issuer,\$cn,\$san\"
+    else
+        echo \"\$server,ERROR: Certificate not found\"
+    fi
+    '"
+}
+
+# Loop through each server and append the details to the CSV
+while IFS= read -r server; do
+    fetch_details "$server" >> "$outputCsv"
+done < "$serverList"
+
+# Send the email with the CSV file as an attachment
+# Using mailx for email; adjust the command according to your system configuration or email sending utility
+mailx -a "$outputCsv" -s "$emailSubject" "$emailRecipient" <<< "Please find attached the SSL Certificate and OS report."
+
+echo "Report sent to $emailRecipient."
