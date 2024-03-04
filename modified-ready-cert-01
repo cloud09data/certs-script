@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Usage: ./ssl_certificate_monitor.sh
+
+# SSL certificate warning periods (in days)
+warning_period_1=60
+warning_period_2=30
+
+# Email parameters
+email_recipient="recipient@example.com"
+email_subject="SSL Certificate Expiry Notification"
+
+# Function to send email notification
+send_email() {
+    local subject="$1"
+    local body="$2"
+    echo -e "$body" | mail -s "$subject" "$email_recipient"
+}
+
+# Function to calculate expiry date
+calculate_expiry_date() {
+    local expiry_date="$1"
+    local warning_period="$2"
+    local today=$(date +%s)
+    local expiry=$(date -d "$expiry_date" +%s)
+    local expiry_warning=$((expiry - (warning_period * 86400)))
+    local days_until_expiry=$(( (expiry_warning - today) / 86400 ))
+    echo "$days_until_expiry"
+}
+
+# Function to monitor JBoss SSL certificate
+monitor_jboss_ssl_certificate() {
+    local cert_dates=$(keytool -list -v -storepass 'password' -keystore "/jbhome/jboss/standalone/configuration/keystore.jks" 2>/dev/null | grep 'Valid from' | head -n 1)
+    local installed_date=$(echo "$cert_dates" | grep -oP 'Valid from: \K.*?(?= until)' | xargs)
+    local expiry_date=$(echo "$cert_dates" | grep -oP 'until.*$' | grep -oP '\b(\w{3} \w{3} \d{1,2} \d{2}:\d{2}:\d{2} \w{3} \d{4})')
+    local expiry_days=$(calculate_expiry_date "$expiry_date" "$warning_period_1")
+    
+    if [ "$expiry_days" -lt 0 ]; then
+        send_email "$email_subject" "The JBoss SSL certificate has expired."
+    elif [ "$expiry_days" -lt "$warning_period_1" ]; then
+        send_email "$email_subject" "This is just a reminder that your JBoss SSL certificate will expire in $warning_period_1 days. Next notification is in $warning_period_2 days."
+    fi
+}
+
+# Function to monitor Apache SSL certificate
+monitor_apache_ssl_certificate() {
+    local cert_file="/path/to/apache/certificate.pem"
+    local installed_date=$(openssl x509 -noout -startdate -in "$cert_file" | awk -F'=' '{print $2}' | awk '{$NF=""; print $0}')
+    local expiry_date=$(openssl x509 -noout -enddate -in "$cert_file" | awk -F'=' '{print $2}' | awk '{$NF=""; print $0}')
+    local expiry_days=$(calculate_expiry_date "$expiry_date" "$warning_period_1")
+    
+    if [ "$expiry_days" -lt 0 ]; then
+        send_email "$email_subject" "The Apache SSL certificate has expired."
+    elif [ "$expiry_days" -lt "$warning_period_1" ]; then
+        send_email "$email_subject" "This is just a reminder that your Apache SSL certificate will expire in $warning_period_1 days. Next notification is in $warning_period_2 days."
+    fi
+}
+
+# Main function
+main() {
+    while IFS= read -r server; do
+        echo "Checking server: $server"
+        if [[ -f "$server/jbhome/jboss/standalone/configuration/keystore.jks" ]]; then
+            monitor_jboss_ssl_certificate
+        fi
+        if [[ -f "$server/path/to/apache/certificate.pem" ]]; then
+            monitor_apache_ssl_certificate
+        fi
+    done < server_list.txt
+}
+
+# Execute the main function
+main
